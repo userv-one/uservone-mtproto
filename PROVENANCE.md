@@ -1,6 +1,6 @@
 # Provenance
 
-- Product version: `uservone-media-dc-203`
+- Project: `uservone-mtproto`
 - Protocol reference: https://github.com/alexbers/mtprotoproxy
 - Pinned reference commit: `bd5b03cd998eee5e916c5fcea8519d6d2c331d4d`
 - Implementation: independent Go core; no Python runtime or upstream Python files are required.

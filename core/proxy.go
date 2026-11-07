@@ -36,7 +36,7 @@ type clientSession struct {
 	encryptor cipher.Stream
 }
 
-// Proxy is an embeddable MTProto secure-transport proxy.
+// Proxy serves MTProto connections.
 type Proxy struct {
 	config      Config
 	users       []user
@@ -46,7 +46,7 @@ type Proxy struct {
 	replay      *replayCache
 }
 
-// New validates cfg and constructs an independent proxy core.
+// New validates cfg and returns a Proxy.
 func New(cfg Config) (*Proxy, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err

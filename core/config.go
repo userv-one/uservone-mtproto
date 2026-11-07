@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Config contains the public settings needed to embed the proxy core.
+// Config is the proxy configuration.
 type Config struct {
 	Listen           string            `json:"listen"`
 	Users            map[string]string `json:"users"`
@@ -75,7 +75,7 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
-// Validate rejects configurations that would silently create an unsafe proxy.
+// Validate checks c for invalid or unsafe values.
 func (c Config) Validate() error {
 	if !c.EnableSecure && !c.EnableTLS {
 		return errors.New("at least one of secure or fake-TLS transport must be enabled")

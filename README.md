@@ -1,29 +1,25 @@
-# uservone-media-dc-203
+# uservone-mtproto
 
-Самостоятельное ядро MTProto-прокси на Go для последующего встраивания в `userv.one`.
+MTProto-прокси на Go. Поддерживает `dd` и fake-TLS (`ee`). Классический режим не поддерживается.
 
-## Что реализовано
+## Возможности
 
-- `dd` — MTProto secure intermediate с случайным padding; payload передаётся без перепаковки.
-- Fake-TLS (`ee`) — проверка ClientHello по HMAC-SHA256, подписанный ServerHello и перенос данных в TLS records.
-- Только защищённые транспорты: classic MTProto не поддерживается.
-- Маскировка неизвестных клиентов: исходные байты прозрачно пересылаются настоящему HTTPS `mask_host`.
-- Ограничение replay для MTProto handshake и fake-TLS ClientHello.
-- Проверка времени ClientHello, handshake/connect timeout и строгая валидация конфигурации.
-- Прямые подключения к Telegram DC 1–5, включая отрицательные DC index.
-- Go API, CLI, Telegram `tg://proxy` ссылки, Docker multi-stage build.
-- Никаких сторонних Go-зависимостей.
+- Прямые подключения к Telegram DC 1–5.
+- Secure intermediate с random-padding.
+- Fake-TLS handshake и передача данных в TLS records.
+- Перенаправление неизвестных клиентов на HTTPS `mask_host`.
+- Replay-cache и проверка времени handshake.
+- JSON-конфиг, CLI и пакет `core`.
 
-> Fake-TLS и masking снижают эффективность простых сигнатур и активного сканирования, но не гарантируют обход DPI, блокировок IP или других мер РКН. Для эксплуатации нужен отдельный реальный TLS 1.3 mask-host и собственный домен.
+## Сборка
 
-## Сборка и проверка
-
-Требуется Go 1.25 или новее.
+Нужен Go 1.25+.
 
 ```bash
 go test ./...
 go vet ./...
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o dist/uservone-media-dc-203 ./cmd/uservone-media-dc-203
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" \
+  -o dist/uservone-mtproto ./cmd/uservone-mtproto
 ```
 
 ## Настройка
@@ -33,31 +29,28 @@ cp config.example.json config.json
 openssl rand -hex 16
 ```
 
-Вставьте сгенерированные 32 hex-символа в `users.media`. Замените `tls_domain` и `mask_host` на реальный HTTPS-домен, который вы контролируете или имеете право использовать как mask-host. Не публикуйте `config.json`: он добавлен в `.gitignore`.
-
-Проверка конфигурации:
+Укажите секрет в `users.media`. Для fake-TLS задайте реальный HTTPS-домен в `tls_domain` и `mask_host`. Не публикуйте `config.json`.
 
 ```bash
-./dist/uservone-media-dc-203 -config config.json -check-config
+./dist/uservone-mtproto -config config.json -check-config
+./dist/uservone-mtproto -config config.json
 ```
 
-Запуск:
+Для TLS-only режима установите `"enable_secure": false`. Порт 443 предпочтителен. При `fake_cert_len: 0` длина ответа выбирается при запуске.
+
+Ссылки для Telegram:
 
 ```bash
-./dist/uservone-media-dc-203 -config config.json
+./dist/uservone-mtproto -config config.json -links-host proxy.example.com
 ```
 
-Ссылки для Telegram (секреты выводятся только по явной команде):
+Команда выводит секреты. Не отправляйте этот вывод в общие логи.
 
-```bash
-./dist/uservone-media-dc-203 -config config.json -links-host proxy.example.com
-```
-
-Для TLS-only режима установите `"enable_secure": false`. Для fake-TLS рекомендуется порт 443. `fake_cert_len: 0` выбирает случайную длину ответа при старте процесса; при необходимости её можно зафиксировать значением 1024–65535.
-
-## Встраивание в userv.one
+## Пакет Go
 
 ```go
+import "github.com/userv-one/uservone-mtproto/core"
+
 cfg := core.DefaultConfig()
 cfg.Listen = ":443"
 cfg.Users = map[string]string{"media": "32_HEX_SECRET"}
@@ -75,21 +68,20 @@ if err != nil {
 return proxy.Serve(ctx, listener)
 ```
 
-Импорт пакета: `userv.one/media-dc-203/core`.
-
 ## Docker
 
 ```bash
-docker build -t uservone-media-dc-203 .
+docker build -t uservone-mtproto .
 docker run --rm --network host \
-  -v "$PWD/config.json:/etc/uservone/config.json:ro" \
-  uservone-media-dc-203
+  -v "$PWD/config.json:/etc/mtproto/config.json:ro" \
+  uservone-mtproto
 ```
 
-## Границы текущей версии
+## Ограничения
 
-- Реализован direct mode; рекламные теги и Telegram middle-proxy mode не используются.
-- Автоматический подбор длины сертификата с mask-host и ротация IP ещё не реализованы.
-- Интеграционные тесты используют эмулятор Telegram DC, а не внешний production DC.
-- Исходный протоколный ориентир и закреплённый commit указаны в `PROVENANCE.md`.
-- SHA-256 собранных бинарников находится в `dist/SHA256SUMS` после локальной сборки.
+- Нет middle-proxy и ad-tag режима.
+- Длина сертификата mask-host автоматически не измеряется.
+- Тесты используют локальный эмулятор DC, а не production Telegram.
+- Fake-TLS не скрывает IP сервера и не гарантирует обход блокировок.
+
+Источник протокола и закреплённый commit: `PROVENANCE.md`. Настройки безопасности: `SECURITY.md`. SHA-256 артефактов: `dist/SHA256SUMS`.

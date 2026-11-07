@@ -11,10 +11,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	core "userv.one/media-dc-203/core"
+	"github.com/userv-one/uservone-mtproto/core"
 )
 
-const version = "uservone-media-dc-203"
+const version = "uservone-mtproto"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
