@@ -33,5 +33,7 @@ func (p *Proxy) maskBadClient(ctx context.Context, client net.Conn, captured []b
 	}
 	_ = client.SetDeadline(time.Time{})
 	_ = mask.SetDeadline(time.Time{})
-	relay(client, mask, client, client, mask, mask)
+	clientReader := withReadTimeout(client, client, p.config.ReadTimeout)
+	maskReader := withReadTimeout(mask, mask, p.config.ReadTimeout)
+	relay(client, mask, clientReader, client, maskReader, mask)
 }

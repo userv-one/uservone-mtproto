@@ -62,14 +62,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	logger := log.New(stderr, version+": ", log.LstdFlags)
+	if cfg.EnableTLS && cfg.Mask && cfg.MatchMaskHost && cfg.FakeCertLen == 0 {
+		if err := proxy.RefreshMaskProfile(ctx); err != nil {
+			logger.Printf("mask host probe failed: %v", err)
+			return 1
+		}
+	}
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		fmt.Fprintf(stderr, "listen error: %v\n", err)
 		return 1
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	logger := log.New(stderr, version+": ", log.LstdFlags)
 	logger.Printf("listening on %s (dd=%t, fake-TLS=%t, mask=%t)", cfg.Listen, cfg.EnableSecure, cfg.EnableTLS, cfg.Mask)
 	if err := proxy.Serve(ctx, listener); err != nil {
 		logger.Printf("server error: %v", err)

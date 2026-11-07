@@ -45,17 +45,22 @@ func TestValidateRequiresAtLeastOneTransport(t *testing.T) {
 
 func TestValidateRejectsInvalidNetworkAndSafetyLimits(t *testing.T) {
 	tests := map[string]func(*Config){
-		"empty listen address": func(c *Config) { c.Listen = "" },
-		"listen without port":  func(c *Config) { c.Listen = "127.0.0.1" },
-		"invalid listen port":  func(c *Config) { c.Listen = ":70000" },
-		"empty TLS domain":     func(c *Config) { c.TLSDomain = "" },
-		"empty mask host":      func(c *Config) { c.MaskHost = "" },
-		"invalid mask port":    func(c *Config) { c.MaskPort = 0 },
-		"no handshake timeout": func(c *Config) { c.HandshakeTimeout = 0 },
-		"no connect timeout":   func(c *Config) { c.ConnectTimeout = 0 },
-		"negative replay size": func(c *Config) { c.ReplayCacheSize = -1 },
-		"short fake cert":      func(c *Config) { c.FakeCertLen = 100 },
-		"oversized fake cert":  func(c *Config) { c.FakeCertLen = 65536 },
+		"empty listen address":  func(c *Config) { c.Listen = "" },
+		"listen without port":   func(c *Config) { c.Listen = "127.0.0.1" },
+		"invalid listen port":   func(c *Config) { c.Listen = ":70000" },
+		"empty TLS domain":      func(c *Config) { c.TLSDomain = "" },
+		"empty mask host":       func(c *Config) { c.MaskHost = "" },
+		"invalid mask port":     func(c *Config) { c.MaskPort = 0 },
+		"no handshake timeout":  func(c *Config) { c.HandshakeTimeout = 0 },
+		"no connect timeout":    func(c *Config) { c.ConnectTimeout = 0 },
+		"no read timeout":       func(c *Config) { c.ReadTimeout = 0 },
+		"negative global limit": func(c *Config) { c.MaxConnections = -1 },
+		"negative IP limit":     func(c *Config) { c.MaxConnectionsPerIP = -1 },
+		"long TLS domain":       func(c *Config) { c.TLSDomain = strings.Repeat("a", 254) },
+		"non-ASCII TLS domain":  func(c *Config) { c.TLSDomain = "приклад.рф" },
+		"negative replay size":  func(c *Config) { c.ReplayCacheSize = -1 },
+		"short fake cert":       func(c *Config) { c.FakeCertLen = 100 },
+		"oversized fake cert":   func(c *Config) { c.FakeCertLen = 65536 },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

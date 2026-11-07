@@ -8,7 +8,9 @@ MTProto-прокси на Go. Поддерживает `dd` и fake-TLS (`ee`). 
 - Secure intermediate с random-padding.
 - Fake-TLS handshake и передача данных в TLS records.
 - Перенаправление неизвестных клиентов на HTTPS `mask_host`.
+- Измерение certificate record реального mask-host.
 - Replay-cache и проверка времени handshake.
+- Лимиты соединений и idle-таймауты.
 - JSON-конфиг, CLI и пакет `core`.
 
 ## Сборка
@@ -36,7 +38,9 @@ openssl rand -hex 16
 ./dist/uservone-mtproto -config config.json
 ```
 
-Для TLS-only режима установите `"enable_secure": false`. Порт 443 предпочтителен. При `fake_cert_len: 0` длина ответа выбирается при запуске.
+Для TLS-only режима установите `"enable_secure": false`. Порт 443 предпочтителен. При `"match_mask_host": true` CLI перед запуском измеряет TLS-ответ mask-host и не стартует при ошибке. Для фиксированной длины задайте `fake_cert_len` и отключите `match_mask_host`.
+
+По умолчанию действуют лимиты 4096 соединений всего, 64 на IP и 600 секунд без чтения. Таймаут продлевается при каждом успешном чтении.
 
 Ссылки для Telegram:
 
@@ -61,6 +65,11 @@ proxy, err := core.New(cfg)
 if err != nil {
     return err
 }
+if cfg.MatchMaskHost && cfg.FakeCertLen == 0 {
+    if err := proxy.RefreshMaskProfile(ctx); err != nil {
+        return err
+    }
+}
 listener, err := net.Listen("tcp", cfg.Listen)
 if err != nil {
     return err
@@ -77,10 +86,23 @@ docker run --rm --network host \
   uservone-mtproto
 ```
 
+## Проверка
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+go test ./core -run FuzzClientHandshakeDoesNotPanic \
+  -fuzz=FuzzClientHandshakeDoesNotPanic -fuzztime=5s
+go test ./core -run FuzzFakeTLSHelloDoesNotPanic \
+  -fuzz=FuzzFakeTLSHelloDoesNotPanic -fuzztime=5s
+```
+
+Те же проверки и Docker build запускаются в GitHub Actions.
+
 ## Ограничения
 
 - Нет middle-proxy и ad-tag режима.
-- Длина сертификата mask-host автоматически не измеряется.
 - Тесты используют локальный эмулятор DC, а не production Telegram.
 - Fake-TLS не скрывает IP сервера и не гарантирует обход блокировок.
 

@@ -154,7 +154,7 @@ func (p *Proxy) makeFakeTLSServerHello(secret, clientDigest, sessionID []byte) (
 	response = append(response, 0x14, 0x03, 0x03, 0x00, 0x01, 0x01)
 	response = append(response, 0x17, 0x03, 0x03, 0, 0)
 
-	certLen := p.fakeCertLen
+	certLen := int(p.fakeCertLen.Load())
 	certificate := make([]byte, certLen)
 	if _, err := rand.Read(certificate); err != nil {
 		return nil, err

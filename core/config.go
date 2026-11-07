@@ -14,35 +14,43 @@ import (
 
 // Config is the proxy configuration.
 type Config struct {
-	Listen           string            `json:"listen"`
-	Users            map[string]string `json:"users"`
-	EnableSecure     bool              `json:"enable_secure"`
-	EnableTLS        bool              `json:"enable_tls"`
-	TLSDomain        string            `json:"tls_domain"`
-	Mask             bool              `json:"mask"`
-	MaskHost         string            `json:"mask_host"`
-	MaskPort         int               `json:"mask_port"`
-	HandshakeTimeout int               `json:"handshake_timeout_seconds"`
-	ConnectTimeout   int               `json:"connect_timeout_seconds"`
-	ReplayCacheSize  int               `json:"replay_cache_size"`
-	FakeCertLen      int               `json:"fake_cert_len"`
-	IgnoreTimeSkew   bool              `json:"ignore_time_skew"`
+	Listen              string            `json:"listen"`
+	Users               map[string]string `json:"users"`
+	EnableSecure        bool              `json:"enable_secure"`
+	EnableTLS           bool              `json:"enable_tls"`
+	TLSDomain           string            `json:"tls_domain"`
+	Mask                bool              `json:"mask"`
+	MaskHost            string            `json:"mask_host"`
+	MaskPort            int               `json:"mask_port"`
+	HandshakeTimeout    int               `json:"handshake_timeout_seconds"`
+	ConnectTimeout      int               `json:"connect_timeout_seconds"`
+	ReadTimeout         int               `json:"read_timeout_seconds"`
+	MaxConnections      int               `json:"max_connections"`
+	MaxConnectionsPerIP int               `json:"max_connections_per_ip"`
+	ReplayCacheSize     int               `json:"replay_cache_size"`
+	FakeCertLen         int               `json:"fake_cert_len"`
+	MatchMaskHost       bool              `json:"match_mask_host"`
+	IgnoreTimeSkew      bool              `json:"ignore_time_skew"`
 }
 
 // DefaultConfig enables only the secure/random-padding and fake-TLS transports.
 func DefaultConfig() Config {
 	return Config{
-		Listen:           ":443",
-		Users:            make(map[string]string),
-		EnableSecure:     true,
-		EnableTLS:        true,
-		TLSDomain:        "www.google.com",
-		Mask:             true,
-		MaskHost:         "www.google.com",
-		MaskPort:         443,
-		HandshakeTimeout: 10,
-		ConnectTimeout:   10,
-		ReplayCacheSize:  65536,
+		Listen:              ":443",
+		Users:               make(map[string]string),
+		EnableSecure:        true,
+		EnableTLS:           true,
+		TLSDomain:           "www.google.com",
+		Mask:                true,
+		MaskHost:            "www.google.com",
+		MaskPort:            443,
+		HandshakeTimeout:    10,
+		ConnectTimeout:      10,
+		ReadTimeout:         600,
+		MaxConnections:      4096,
+		MaxConnectionsPerIP: 64,
+		ReplayCacheSize:     65536,
+		MatchMaskHost:       true,
 	}
 }
 
@@ -88,8 +96,19 @@ func (c Config) Validate() error {
 	if err != nil || listenPort < 1 || listenPort > 65535 {
 		return errors.New("listen port must be between 1 and 65535")
 	}
-	if c.EnableTLS && strings.TrimSpace(c.TLSDomain) == "" {
-		return errors.New("TLS domain is required when fake-TLS is enabled")
+	if c.EnableTLS {
+		if strings.TrimSpace(c.TLSDomain) == "" {
+			return errors.New("TLS domain is required when fake-TLS is enabled")
+		}
+		if len(c.TLSDomain) > 253 {
+			return errors.New("TLS domain is too long")
+		}
+		for _, char := range c.TLSDomain {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+				(char < '0' || char > '9') && char != '.' && char != '-' {
+				return errors.New("TLS domain must be an ASCII host name")
+			}
+		}
 	}
 	if c.Mask {
 		if strings.TrimSpace(c.MaskHost) == "" {
@@ -99,8 +118,11 @@ func (c Config) Validate() error {
 			return errors.New("mask port must be between 1 and 65535")
 		}
 	}
-	if c.HandshakeTimeout <= 0 || c.ConnectTimeout <= 0 {
-		return errors.New("handshake and connect timeouts must be positive")
+	if c.HandshakeTimeout <= 0 || c.ConnectTimeout <= 0 || c.ReadTimeout <= 0 {
+		return errors.New("handshake, connect and read timeouts must be positive")
+	}
+	if c.MaxConnections < 0 || c.MaxConnectionsPerIP < 0 {
+		return errors.New("connection limits cannot be negative")
 	}
 	if c.ReplayCacheSize < 0 {
 		return errors.New("replay cache size cannot be negative")

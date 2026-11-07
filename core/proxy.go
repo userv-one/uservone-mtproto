@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,7 +43,7 @@ type Proxy struct {
 	users       []user
 	datacenters map[int]string
 	dialContext func(context.Context, string, string) (net.Conn, error)
-	fakeCertLen int
+	fakeCertLen atomic.Int64
 	replay      *replayCache
 }
 
@@ -63,9 +64,9 @@ func New(cfg Config) (*Proxy, error) {
 		config:      cfg,
 		datacenters: defaultDatacenters(),
 		dialContext: (&net.Dialer{}).DialContext,
-		fakeCertLen: fakeCertLen,
 		replay:      newReplayCache(cfg.ReplayCacheSize),
 	}
+	proxy.fakeCertLen.Store(int64(fakeCertLen))
 	for name, encodedSecret := range cfg.Users {
 		secret, _ := hex.DecodeString(encodedSecret)
 		proxy.users = append(proxy.users, user{name: name, secret: secret})
@@ -86,6 +87,8 @@ func defaultDatacenters() map[int]string {
 type connectionTracker struct {
 	mu          sync.Mutex
 	connections map[net.Conn]struct{}
+	byIP        map[string]int
+	clients     int
 	closing     bool
 }
 
@@ -102,6 +105,43 @@ func (t *connectionTracker) add(conn net.Conn) bool {
 	t.connections[conn] = struct{}{}
 	t.mu.Unlock()
 	return true
+}
+
+func (t *connectionTracker) addClient(conn net.Conn, ip string, maxClients, maxPerIP int) bool {
+	t.mu.Lock()
+	if t.closing {
+		t.mu.Unlock()
+		_ = conn.Close()
+		return false
+	}
+	if (maxClients > 0 && t.clients >= maxClients) || (maxPerIP > 0 && t.byIP[ip] >= maxPerIP) {
+		t.mu.Unlock()
+		return false
+	}
+	if t.connections == nil {
+		t.connections = make(map[net.Conn]struct{})
+	}
+	if t.byIP == nil {
+		t.byIP = make(map[string]int)
+	}
+	t.connections[conn] = struct{}{}
+	t.clients++
+	t.byIP[ip]++
+	t.mu.Unlock()
+	return true
+}
+
+func (t *connectionTracker) removeClient(conn net.Conn, ip string) {
+	t.mu.Lock()
+	if _, found := t.connections[conn]; found {
+		delete(t.connections, conn)
+		t.clients--
+		t.byIP[ip]--
+		if t.byIP[ip] == 0 {
+			delete(t.byIP, ip)
+		}
+	}
+	t.mu.Unlock()
 }
 
 func (t *connectionTracker) remove(conn net.Conn) {
@@ -153,11 +193,13 @@ func (p *Proxy) Serve(ctx context.Context, listener net.Listener) error {
 			}
 			return err
 		}
-		if !connections.add(conn) {
+		ip := remoteIP(conn)
+		if !connections.addClient(conn, ip, p.config.MaxConnections, p.config.MaxConnectionsPerIP) {
+			_ = conn.Close()
 			continue
 		}
 		go func() {
-			defer connections.remove(conn)
+			defer connections.removeClient(conn, ip)
 			p.handleConn(ctx, conn, connections)
 		}()
 	}
@@ -225,12 +267,16 @@ func (p *Proxy) handleConn(ctx context.Context, client net.Conn, connections *co
 	defer telegram.Close()
 	_ = client.SetDeadline(time.Time{})
 
-	clientReader := cipher.StreamReader{S: session.decryptor, R: transportReader}
+	clientReader := withReadTimeout(client, cipher.StreamReader{S: session.decryptor, R: transportReader}, p.config.ReadTimeout)
 	clientWriter := cipher.StreamWriter{S: session.encryptor, W: transportWriter}
+	telegramReader = withReadTimeout(telegram, telegramReader, p.config.ReadTimeout)
 	relay(client, telegram, clientReader, clientWriter, telegramReader, telegramWriter)
 }
 
 func (p *Proxy) decodeClientHandshake(handshake []byte, transportEnabled bool) (*clientSession, error) {
+	if len(handshake) != handshakeLen {
+		return nil, errors.New("invalid MTProto handshake length")
+	}
 	if !transportEnabled {
 		return nil, errors.New("requested secure transport is disabled")
 	}
@@ -297,7 +343,7 @@ func (p *Proxy) openTelegram(ctx context.Context, dc int, connections *connectio
 	encrypted := make([]byte, handshakeLen)
 	encryptor.XORKeyStream(encrypted, nonce)
 	copy(nonce[56:], encrypted[56:])
-	if _, err := conn.Write(nonce); err != nil {
+	if err := writeFull(conn, nonce); err != nil {
 		connections.remove(conn)
 		conn.Close()
 		return nil, nil, nil, err
