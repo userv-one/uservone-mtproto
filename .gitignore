@@ -1,0 +1,6 @@
+/dist/
+/config.json
+*.exe
+*.test
+__pycache__/
+*.pyc

@@ -1,14 +1,14 @@
-FROM ubuntu:24.04
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+COPY go.mod ./
+COPY core ./core
+COPY cmd ./cmd
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -buildid=" -o /uservone-media-dc-203 ./cmd/uservone-media-dc-203
 
-RUN apt-get update && apt-get install --no-install-recommends -y python3 python3-uvloop python3-cryptography python3-socks libcap2-bin ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN setcap cap_net_bind_service=+ep /usr/bin/python3.12
-
-RUN useradd tgproxy -u 10000
-
-USER tgproxy
-
-WORKDIR /home/tgproxy/
-
-COPY --chown=tgproxy mtprotoproxy.py config.py /home/tgproxy/
-
-CMD ["python3", "mtprotoproxy.py"]
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /uservone-media-dc-203 /uservone-media-dc-203
+USER 65532:65532
+EXPOSE 443
+ENTRYPOINT ["/uservone-media-dc-203"]
+CMD ["-config", "/etc/uservone/config.json"]

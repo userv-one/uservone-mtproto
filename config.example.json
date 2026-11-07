@@ -1,0 +1,17 @@
+{
+  "listen": ":443",
+  "users": {
+    "media": ""
+  },
+  "enable_secure": true,
+  "enable_tls": true,
+  "tls_domain": "www.google.com",
+  "mask": true,
+  "mask_host": "www.google.com",
+  "mask_port": 443,
+  "handshake_timeout_seconds": 10,
+  "connect_timeout_seconds": 10,
+  "replay_cache_size": 65536,
+  "fake_cert_len": 0,
+  "ignore_time_skew": false
+}
