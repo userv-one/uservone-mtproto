@@ -89,7 +89,7 @@ func (p *Proxy) handleFakeTLS(client net.Conn, hello []byte) (*fakeTLSReader, *f
 	}
 
 	clientDigest := hello[tlsDigestPos : tlsDigestPos+tlsDigestLen]
-	for _, candidate := range p.users {
+	for _, candidate := range p.users.snapshot() {
 		message := append([]byte(nil), hello...)
 		for i := tlsDigestPos; i < tlsDigestPos+tlsDigestLen; i++ {
 			message[i] = 0

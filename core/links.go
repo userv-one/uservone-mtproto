@@ -11,9 +11,9 @@ import (
 
 // Link is a Telegram deep link for one user and transport.
 type Link struct {
-	User      string
-	Transport string
-	URL       string
+	User      string `json:"user"`
+	Transport string `json:"transport"`
+	URL       string `json:"url"`
 }
 
 // Links generates dd and fake-TLS links for a public server name or address.
@@ -25,7 +25,7 @@ func (p *Proxy) Links(publicHost string) ([]Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	users := append([]user(nil), p.users...)
+	users := p.users.currentUsers()
 	sort.Slice(users, func(i, j int) bool { return users[i].name < users[j].name })
 
 	links := make([]Link, 0, len(users)*2)

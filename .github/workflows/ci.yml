@@ -20,6 +20,7 @@ jobs:
       - run: go test ./... -count=1
       - run: go test -race ./... -count=1
       - run: go vet ./...
+      - run: bash scripts/build-release_test.sh
       - run: go test ./core -run FuzzClientHandshakeDoesNotPanic -fuzz=FuzzClientHandshakeDoesNotPanic -fuzztime=5s
       - run: go test ./core -run FuzzFakeTLSHelloDoesNotPanic -fuzz=FuzzFakeTLSHelloDoesNotPanic -fuzztime=5s
       - run: CGO_ENABLED=0 go build -trimpath -o /tmp/uservone-mtproto ./cmd/uservone-mtproto

@@ -1,5 +1,6 @@
 {
   "listen": ":443",
+  "metrics_listen": "127.0.0.1:9100",
   "users": {
     "media": ""
   },
@@ -15,6 +16,7 @@
   "max_connections": 4096,
   "max_connections_per_ip": 64,
   "replay_cache_size": 65536,
+  "rotation_grace_seconds": 300,
   "fake_cert_len": 0,
   "match_mask_host": true,
   "ignore_time_skew": false

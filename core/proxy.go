@@ -40,11 +40,12 @@ type clientSession struct {
 // Proxy serves MTProto connections.
 type Proxy struct {
 	config      Config
-	users       []user
+	users       *rotatingUsers
 	datacenters map[int]string
 	dialContext func(context.Context, string, string) (net.Conn, error)
 	fakeCertLen atomic.Int64
 	replay      *replayCache
+	metrics     *Metrics
 }
 
 // New validates cfg and returns a Proxy.
@@ -65,13 +66,21 @@ func New(cfg Config) (*Proxy, error) {
 		datacenters: defaultDatacenters(),
 		dialContext: (&net.Dialer{}).DialContext,
 		replay:      newReplayCache(cfg.ReplayCacheSize),
+		metrics:     NewMetrics(),
 	}
 	proxy.fakeCertLen.Store(int64(fakeCertLen))
+	users := make([]user, 0, len(cfg.Users))
 	for name, encodedSecret := range cfg.Users {
 		secret, _ := hex.DecodeString(encodedSecret)
-		proxy.users = append(proxy.users, user{name: name, secret: secret})
+		users = append(users, user{name: name, secret: secret})
 	}
+	proxy.users = newRotatingUsers(users)
 	return proxy, nil
+}
+
+// Metrics returns the proxy's concurrency-safe metrics collector.
+func (p *Proxy) Metrics() *Metrics {
+	return p.metrics
 }
 
 func defaultDatacenters() map[int]string {
@@ -198,7 +207,9 @@ func (p *Proxy) Serve(ctx context.Context, listener net.Listener) error {
 			_ = conn.Close()
 			continue
 		}
+		p.metrics.ClientConnected()
 		go func() {
+			defer p.metrics.ClientDisconnected()
 			defer connections.removeClient(conn, ip)
 			p.handleConn(ctx, conn, connections)
 		}()
@@ -213,6 +224,7 @@ func (p *Proxy) handleConn(ctx context.Context, client net.Conn, connections *co
 
 	prefix := make([]byte, 3)
 	if _, err := io.ReadFull(client, prefix); err != nil {
+		p.metrics.RecordHandshakeError("read")
 		return
 	}
 	isTLS := string(prefix) == "\x16\x03\x01"
@@ -222,6 +234,7 @@ func (p *Proxy) handleConn(ctx context.Context, client net.Conn, connections *co
 	if isTLS {
 		lengthBytes := make([]byte, 2)
 		if _, err := io.ReadFull(client, lengthBytes); err != nil {
+			p.metrics.RecordHandshakeError("read")
 			return
 		}
 		clientHelloLen := int(binary.BigEndian.Uint16(lengthBytes))
@@ -229,21 +242,25 @@ func (p *Proxy) handleConn(ctx context.Context, client net.Conn, connections *co
 		copy(clientHello, prefix)
 		copy(clientHello[3:], lengthBytes)
 		if _, err := io.ReadFull(client, clientHello[5:]); err != nil {
+			p.metrics.RecordHandshakeError("read")
 			return
 		}
 		tlsReader, tlsWriter, err := p.handleFakeTLS(client, clientHello)
 		if err != nil {
+			p.metrics.RecordHandshakeError("fake_tls")
 			p.maskBadClient(ctx, client, clientHello, connections)
 			return
 		}
 		transportReader = tlsReader
 		transportWriter = tlsWriter
 		if _, err := io.ReadFull(transportReader, handshake); err != nil {
+			p.metrics.RecordHandshakeError("read")
 			return
 		}
 	} else {
 		copy(handshake, prefix)
 		if _, err := io.ReadFull(transportReader, handshake[len(prefix):]); err != nil {
+			p.metrics.RecordHandshakeError("read")
 			return
 		}
 	}
@@ -253,6 +270,7 @@ func (p *Proxy) handleConn(ctx context.Context, client net.Conn, connections *co
 	}
 	session, err := p.decodeClientHandshake(handshake, transportEnabled)
 	if err != nil {
+		p.metrics.RecordHandshakeError("invalid")
 		if !isTLS {
 			p.maskBadClient(ctx, client, handshake, connections)
 		}
@@ -280,7 +298,7 @@ func (p *Proxy) decodeClientHandshake(handshake []byte, transportEnabled bool) (
 	if !transportEnabled {
 		return nil, errors.New("requested secure transport is disabled")
 	}
-	for _, candidate := range p.users {
+	for _, candidate := range p.users.snapshot() {
 		decKeyAndIV := handshake[8:56]
 		decKeyInput := append(append([]byte(nil), decKeyAndIV[:32]...), candidate.secret...)
 		decKey := sha256.Sum256(decKeyInput)
@@ -327,8 +345,10 @@ func (p *Proxy) openTelegram(ctx context.Context, dc int, connections *connectio
 	}
 	conn, err := p.dialContext(ctx, "tcp", address)
 	if err != nil {
+		p.metrics.RecordDCFailure(index)
 		return nil, nil, nil, err
 	}
+	p.metrics.RecordDCSuccess(index)
 	if !connections.add(conn) {
 		return nil, nil, nil, ctx.Err()
 	}

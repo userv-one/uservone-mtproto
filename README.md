@@ -11,6 +11,9 @@ MTProto-прокси на Go. Поддерживает `dd` и fake-TLS (`ee`). 
 - Измерение certificate record реального mask-host.
 - Replay-cache и проверка времени handshake.
 - Лимиты соединений и idle-таймауты.
+- Rotation секретов по SIGHUP с grace period.
+- Health JSON и Prometheus-метрики.
+- Генератор конфигурации из entitled UUID records.
 - JSON-конфиг, CLI и пакет `core`.
 
 ## Сборка
@@ -48,7 +51,23 @@ openssl rand -hex 16
 ./dist/uservone-mtproto -config config.json -links-host proxy.example.com
 ```
 
-Команда выводит секреты. Не отправляйте этот вывод в общие логи.
+Команда выводит секреты. Не отправляйте этот вывод в общие логи. Для интеграции доступен JSON:
+
+```bash
+./dist/uservone-mtproto -config config.json -links-host proxy.example.com --format json
+./dist/uservone-mtproto -version-json
+```
+
+## Health, метрики и rotation
+
+Если задан `metrics_listen`, например `127.0.0.1:9100`, доступны:
+
+- `GET /health` — текущие соединения, handshake errors и наблюдаемая доступность DC.
+- `GET /metrics` — Prometheus text format.
+
+`SIGHUP` перечитывает только пользователей. Новые секреты действуют сразу, прежние — ещё `rotation_grace_seconds`. Ошибка нового конфига оставляет прежние секреты. Активные соединения не разрываются. Windows-версия не получает SIGHUP.
+
+Генератор конфигурации и схема entitled records описаны в `compat/README.md`. Переход с Python и откат — в `MIGRATION.md`.
 
 ## Пакет Go
 
@@ -79,12 +98,23 @@ return proxy.Serve(ctx, listener)
 
 ## Docker
 
+Генератор создаёт `config.json` с режимом `0600` и владельцем текущего пользователя. Релизный контейнер работает как UID/GID `65532`, поэтому на Linux-хосте после генерации передайте файл этому пользователю, сохранив закрытые права:
+
+```bash
+sudo chown 65532:65532 config.json
+sudo chmod 0600 config.json
+```
+
+Повторяйте передачу владельца после каждой регенерации: атомарная замена создаёт новый файл. Монтирование `:ro` не обходит проверку владельца и прав.
+
 ```bash
 docker build -t uservone-mtproto .
 docker run --rm --network host \
   -v "$PWD/config.json:/etc/mtproto/config.json:ro" \
   uservone-mtproto
 ```
+
+Образ релиза: `ghcr.io/userv-one/uservone-mtproto:v0.3.0` (`linux/amd64`, `linux/arm64`).
 
 ## Проверка
 

@@ -6,51 +6,60 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+const maxRotationGraceSeconds = math.MaxInt64 / int64(time.Second)
 
 // Config is the proxy configuration.
 type Config struct {
-	Listen              string            `json:"listen"`
-	Users               map[string]string `json:"users"`
-	EnableSecure        bool              `json:"enable_secure"`
-	EnableTLS           bool              `json:"enable_tls"`
-	TLSDomain           string            `json:"tls_domain"`
-	Mask                bool              `json:"mask"`
-	MaskHost            string            `json:"mask_host"`
-	MaskPort            int               `json:"mask_port"`
-	HandshakeTimeout    int               `json:"handshake_timeout_seconds"`
-	ConnectTimeout      int               `json:"connect_timeout_seconds"`
-	ReadTimeout         int               `json:"read_timeout_seconds"`
-	MaxConnections      int               `json:"max_connections"`
-	MaxConnectionsPerIP int               `json:"max_connections_per_ip"`
-	ReplayCacheSize     int               `json:"replay_cache_size"`
-	FakeCertLen         int               `json:"fake_cert_len"`
-	MatchMaskHost       bool              `json:"match_mask_host"`
-	IgnoreTimeSkew      bool              `json:"ignore_time_skew"`
+	Listen               string            `json:"listen"`
+	MetricsListen        string            `json:"metrics_listen"`
+	Users                map[string]string `json:"users"`
+	EnableSecure         bool              `json:"enable_secure"`
+	EnableTLS            bool              `json:"enable_tls"`
+	UseMiddleProxy       bool              `json:"use_middle_proxy"`
+	ADTag                string            `json:"ad_tag"`
+	TLSDomain            string            `json:"tls_domain"`
+	Mask                 bool              `json:"mask"`
+	MaskHost             string            `json:"mask_host"`
+	MaskPort             int               `json:"mask_port"`
+	HandshakeTimeout     int               `json:"handshake_timeout_seconds"`
+	ConnectTimeout       int               `json:"connect_timeout_seconds"`
+	ReadTimeout          int               `json:"read_timeout_seconds"`
+	MaxConnections       int               `json:"max_connections"`
+	MaxConnectionsPerIP  int               `json:"max_connections_per_ip"`
+	ReplayCacheSize      int               `json:"replay_cache_size"`
+	RotationGraceSeconds int               `json:"rotation_grace_seconds"`
+	FakeCertLen          int               `json:"fake_cert_len"`
+	MatchMaskHost        bool              `json:"match_mask_host"`
+	IgnoreTimeSkew       bool              `json:"ignore_time_skew"`
 }
 
 // DefaultConfig enables only the secure/random-padding and fake-TLS transports.
 func DefaultConfig() Config {
 	return Config{
-		Listen:              ":443",
-		Users:               make(map[string]string),
-		EnableSecure:        true,
-		EnableTLS:           true,
-		TLSDomain:           "www.google.com",
-		Mask:                true,
-		MaskHost:            "www.google.com",
-		MaskPort:            443,
-		HandshakeTimeout:    10,
-		ConnectTimeout:      10,
-		ReadTimeout:         600,
-		MaxConnections:      4096,
-		MaxConnectionsPerIP: 64,
-		ReplayCacheSize:     65536,
-		MatchMaskHost:       true,
+		Listen:               ":443",
+		Users:                make(map[string]string),
+		EnableSecure:         true,
+		EnableTLS:            true,
+		TLSDomain:            "www.google.com",
+		Mask:                 true,
+		MaskHost:             "www.google.com",
+		MaskPort:             443,
+		HandshakeTimeout:     10,
+		ConnectTimeout:       10,
+		ReadTimeout:          600,
+		MaxConnections:       4096,
+		MaxConnectionsPerIP:  64,
+		ReplayCacheSize:      65536,
+		RotationGraceSeconds: 300,
+		MatchMaskHost:        true,
 	}
 }
 
@@ -85,6 +94,9 @@ func LoadConfig(path string) (Config, error) {
 
 // Validate checks c for invalid or unsafe values.
 func (c Config) Validate() error {
+	if c.UseMiddleProxy || c.ADTag != "" {
+		return errors.New("middle-proxy and AD_TAG are not supported; keep the Python implementation for this node")
+	}
 	if !c.EnableSecure && !c.EnableTLS {
 		return errors.New("at least one of secure or fake-TLS transport must be enabled")
 	}
@@ -95,6 +107,16 @@ func (c Config) Validate() error {
 	listenPort, err := strconv.Atoi(listenPortText)
 	if err != nil || listenPort < 1 || listenPort > 65535 {
 		return errors.New("listen port must be between 1 and 65535")
+	}
+	if c.MetricsListen != "" {
+		_, metricsPortText, err := net.SplitHostPort(c.MetricsListen)
+		if err != nil {
+			return fmt.Errorf("invalid metrics listen address: %w", err)
+		}
+		metricsPort, err := strconv.Atoi(metricsPortText)
+		if err != nil || metricsPort < 1 || metricsPort > 65535 {
+			return errors.New("metrics port must be between 1 and 65535")
+		}
 	}
 	if c.EnableTLS {
 		if strings.TrimSpace(c.TLSDomain) == "" {
@@ -126,6 +148,12 @@ func (c Config) Validate() error {
 	}
 	if c.ReplayCacheSize < 0 {
 		return errors.New("replay cache size cannot be negative")
+	}
+	if c.RotationGraceSeconds < 0 {
+		return errors.New("rotation grace period cannot be negative")
+	}
+	if int64(c.RotationGraceSeconds) > maxRotationGraceSeconds {
+		return fmt.Errorf("rotation grace period cannot exceed %d seconds", maxRotationGraceSeconds)
 	}
 	if c.FakeCertLen != 0 && (c.FakeCertLen < 1024 || c.FakeCertLen > 65535) {
 		return errors.New("fake certificate length must be zero or between 1024 and 65535")
