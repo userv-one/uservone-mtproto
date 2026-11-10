@@ -160,6 +160,25 @@ test_clean_output() {
   fi
 }
 
+test_publish_job_has_checkout() {
+  local workflow="$SOURCE_ROOT/.github/workflows/release.yml"
+  if command -v cygpath >/dev/null 2>&1; then
+    workflow=$(cygpath -m "$workflow")
+  fi
+  python3 - "$workflow" <<'PY'
+import sys
+
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+start = next((index for index, line in enumerate(lines) if line.startswith("  publish:")), None)
+assert start is not None, "publish job is missing"
+end = next((index for index in range(start + 1, len(lines))
+            if lines[index] and not lines[index].startswith("    ")), len(lines))
+block = "\n".join(lines[start:end])
+assert "actions/checkout@v4" in block, "publish job must create a Git repository for gh release create"
+assert "persist-credentials: false" in block, "publish checkout must not persist credentials"
+PY
+}
+
 failures=0
 for test in \
   test_dirty_tree \
@@ -169,7 +188,8 @@ for test in \
   test_malformed_tag \
   test_version_and_metadata \
   test_ignored_go_source_excluded \
-  test_clean_output; do
+  test_clean_output \
+  test_publish_job_has_checkout; do
   reset_repo
   if (set -e; "$test"); then
     printf 'ok - %s\n' "$test"
